@@ -1,0 +1,37 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Test artifacts
+.pytest_cache/
+*.log
+coverage/
+htmlcov/
+
+# Output files
+reports/
+*.json
+*.md
+!README.md
+!SOP.md
+!Validation/**/*.md
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Git
+*.orig
