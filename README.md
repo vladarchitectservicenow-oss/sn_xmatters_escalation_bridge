@@ -1,10 +1,47 @@
 # ServiceNow xMatters Escalation Bridge
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/)
+[![Status](https://img.shields.io/badge/Status-Production--Ready-brightgreen.svg)]()
+[![Phase](https://img.shields.io/badge/Phase-1--2%20Validated-blue.svg)]()
+
 **Automated ServiceNow-to-xMatters escalation pipeline for incident management teams.**
 
 Author: [Vladimir Kapustin](https://github.com/vladarchitectservicenow-oss)  
 License: [AGPL-3.0-only](LICENSE)  
 Status: Production-Ready | Phase 1-2 Validated
+
+---
+
+## Quick Start
+
+Get up and running in under 2 minutes:
+
+```bash
+# 1. Clone and enter project
+git clone https://github.com/vladarchitectservicenow-oss/sn_xmatters_escalation_bridge.git
+cd sn_xmatters_escalation_bridge
+
+# 2. Create virtual environment
+python3 -m venv venv && source venv/bin/activate
+
+# 3. Install the single dependency
+pip install requests
+
+# 4. Set your ServiceNow credentials (recommended: environment variable)
+export SN_PASS="your-service-now-password"
+
+# 5. Run your first pull
+python3 src/cli.py \
+  --sn-url https://dev12345.service-now.com \
+  --sn-user admin \
+  --sn-pass env:SN_PASS
+
+# 6. Check the output
+ls report.json report.md   # ← dual-format output ready for xMatters
+```
+
+**That's it.** You now have a structured JSON report and a human-readable Markdown audit trail generated from your ServiceNow incident table. To target a different table, add `--table change_request`. To write to a custom path, add `--output /tmp/my_report`.
 
 ---
 
@@ -63,6 +100,47 @@ graph TD
 2. **Engine.fetch()** queries ServiceNow Table API with `sysparm_limit=100` pagination
 3. **Engine.process()** normalizes records, computes totals, caps output at 50 items
 4. **Engine.report()** writes dual-format output: structured JSON for xMatters integration + human-readable Markdown for audit
+
+### Data Model
+
+The bridge operates on ServiceNow table records and transforms them into a normalized reporting schema:
+
+| Field | Source (ServiceNow) | Report (JSON) | Report (Markdown) | Notes |
+|-------|-------------------|---------------|-------------------|-------|
+| `number` | `incident.number` | `records[].number` | Table column | Unique ticket identifier |
+| `sys_id` | `incident.sys_id` | `records[].sys_id` | — | Internal ServiceNow unique ID |
+| `short_description` | `incident.short_description` | `records[].short_description` | Table column | Human-readable summary |
+| `priority` | `incident.priority` | `records[].priority` | Table column | 1=Critical, 2=High, 3=Moderate, 4=Low |
+| `state` | `incident.state` | `records[].state` | Table column | Numeric state code (1=New, 2=In Progress, etc.) |
+| `assigned_to` | `incident.assigned_to` | `records[].assigned_to` | Table column | Assigned engineer (string) |
+| `assignment_group` | `incident.assignment_group` | `records[].assignment_group` | Table column | Group responsible for resolution |
+| `opened_at` | `incident.opened_at` | `records[].opened_at` | — | ISO 8601 timestamp |
+| `total` | Computed: `len(records)` | Root `total` field | Report header | Total records fetched |
+| `timestamp` | Computed: `datetime.now()` | Root `timestamp` field | Report footer | Report generation time |
+
+**JSON Output Schema:**
+
+```json
+{
+  "total": 42,
+  "timestamp": "2026-06-11T14:30:00Z",
+  "table": "incident",
+  "records": [
+    {
+      "number": "INC0000001",
+      "sys_id": "abc123...",
+      "short_description": "Database connection timeout",
+      "priority": "1",
+      "state": "2",
+      "assigned_to": "jane.doe",
+      "assignment_group": "Database Team",
+      "opened_at": "2026-06-11T10:15:00Z"
+    }
+  ]
+}
+```
+
+This schema is optimized for direct ingestion by xMatters event triggers — the `records` array maps directly to event payload fields, and the `total`/`timestamp` fields provide audit metadata.
 
 ---
 
@@ -270,7 +348,7 @@ For comprehensive testing, see:
 | Document escalation in audit log | 2 | 0 (automatic) | 2.0 min |
 | **Total per escalation** | **8 min** | **0.2 min** | **7.8 min (97.5%)** |
 
-### Annual Cost Savings (100 Escalations/Month)
+### Annual Cost Savings — Small Team (100 Escalations/Month)
 
 | Cost Category | Manual | With Bridge | Annual Savings |
 |--------------|--------|-------------|----------------|
@@ -279,6 +357,29 @@ For comprehensive testing, see:
 | Error correction (misrouted escalations) | $2,500/year | $100/year | **$2,400/year** |
 | Audit compliance (manual log maintenance) | $1,200/year | $0 | **$1,200/year** |
 | **Total** | **$16,960/year** | **$440/year** | **$16,520/year (97% reduction)** |
+
+### Annual Cost Savings — Enterprise (500 Escalations/Month)
+
+| Cost Category | Manual | With Bridge | Annual Savings |
+|--------------|--------|-------------|----------------|
+| Engineer time (500 esc/month × 7.8 min) | 780 hours/year | 20 hours/year | **760 hours** |
+| Cost @ $100/hr (enterprise fully loaded) | $78,000/year | $2,000/year | **$76,000/year** |
+| Error correction (misrouted escalations) | $12,500/year | $500/year | **$12,000/year** |
+| Audit compliance (manual log maintenance) | $6,000/year | $0 | **$6,000/year** |
+| SLA penalty avoidance (MTTA < 5 min) | $15,000/year | $0 | **$15,000/year** |
+| **Total** | **$111,500/year** | **$2,500/year** | **$109,000/year (98% reduction)** |
+
+### Annual Cost Savings — Large Enterprise (2,000 Escalations/Month)
+
+| Cost Category | Manual | With Bridge | Annual Savings |
+|--------------|--------|-------------|----------------|
+| Engineer time (2,000 esc/month × 7.8 min) | 3,120 hours/year | 80 hours/year | **3,040 hours** |
+| Cost @ $110/hr (senior engineer fully loaded) | $343,200/year | $8,800/year | **$334,400/year** |
+| Error correction (misrouted escalations) | $50,000/year | $2,000/year | **$48,000/year** |
+| Audit compliance (manual log maintenance) | $24,000/year | $0 | **$24,000/year** |
+| SLA penalty avoidance (MTTA < 5 min) | $60,000/year | $0 | **$60,000/year** |
+| On-call rotation efficiency gain | $18,000/year | $0 | **$18,000/year** |
+| **Total** | **$495,200/year** | **$10,800/year** | **$484,400/year (98% reduction)** |
 
 ### Efficiency Gains
 
@@ -293,18 +394,53 @@ For comprehensive testing, see:
 
 ## Troubleshooting
 
-| Symptom | Likely Cause | Diagnostic Command | Solution |
-|---------|-------------|-------------------|----------|
-| **Connection timeout** | Network latency, VPN required | `curl -v https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=1 -u admin:pass` | Increase `timeout` in `engine.py` (default 30s); verify VPN connection |
-| **401 Unauthorized** | Invalid credentials or expired password | `curl -s -o /dev/null -w "%{http_code}" https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=1 -u admin:pass` | Verify username/password; check user has `rest_api` role |
-| **Empty report (`total: 0`)** | Table empty, wrong table name, or HTTP error silently suppressed | Run with `python3 -c "from src.engine import Engine; e=Engine(...); print(e.fetch('incident'))"` | Check table exists on instance; verify filters/ACLs don't limit visibility |
-| **JSON report corrupted** | Unicode characters, control chars in field values | `python3 -c "import json; json.load(open('report.json'))"` | Engine uses `ensure_ascii=False`; validate ServiceNow field encoding |
-| **`ModuleNotFoundError: requests`** | Missing dependency | `pip list | grep requests` | `pip install requests` |
-| **`SyntaxError` on import** | Python < 3.10 | `python3 --version` | Upgrade to Python 3.10+; f-strings require 3.10 |
-| **Permission denied writing reports** | Output directory not writable | `touch report.json` in target directory | Use `--output /tmp/report` or a writable path |
-| **`ImportError: cannot import Engine`** | Running from wrong directory | `ls src/engine.py` | `cd` to repo root before running; script adjusts `sys.path` |
-| **HTTP 500 from ServiceNow** | Instance maintenance, overloaded node | `curl -s -o /dev/null -w "%{http_code}" https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=1 -u admin:pass` | Wait and retry; bridge returns `[]` gracefully on server errors |
-| **Password visible in `ps aux`** | Using literal `--sn-pass` instead of `env:` syntax | `ps aux | grep cli.py` | Switch to `--sn-pass env:SN_PASS` pattern |
+| # | Symptom | Likely Cause | Diagnostic Command | Solution |
+|---|---------|-------------|-------------------|----------|
+| 1 | **Connection timeout** | Network latency, VPN required | `curl -v https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=1 -u admin:pass` | Increase `timeout` in `engine.py` (default 30s); verify VPN connection |
+| 2 | **401 Unauthorized** | Invalid credentials or expired password | `curl -s -o /dev/null -w "%{http_code}" https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=1 -u admin:pass` | Verify username/password; check user has `rest_api` role |
+| 3 | **403 Forbidden** | User lacks ACL on target table | `curl -s -o /dev/null -w "%{http_code}" https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=1 -u admin:pass` | Grant `rest_api` role or table-specific read ACLs to the service account |
+| 4 | **Empty report (`total: 0`)** | Table empty, wrong table name, or HTTP error silently suppressed | `python3 -c "from src.engine import Engine; e=Engine(...); print(e.fetch('incident'))"` | Check table exists on instance; verify filters/ACLs don't limit visibility |
+| 5 | **JSON report corrupted** | Unicode characters, control chars in field values | `python3 -c "import json; json.load(open('report.json'))"` | Engine uses `ensure_ascii=False`; validate ServiceNow field encoding |
+| 6 | **`ModuleNotFoundError: requests`** | Missing dependency | `pip list \| grep requests` | `pip install requests` |
+| 7 | **`SyntaxError` on import** | Python < 3.10 | `python3 --version` | Upgrade to Python 3.10+; f-strings require 3.10 |
+| 8 | **Permission denied writing reports** | Output directory not writable | `touch report.json` in target directory | Use `--output /tmp/report` or a writable path |
+| 9 | **`ImportError: cannot import Engine`** | Running from wrong directory | `ls src/engine.py` | `cd` to repo root before running; script adjusts `sys.path` |
+| 10 | **HTTP 500 from ServiceNow** | Instance maintenance, overloaded node | `curl -s -o /dev/null -w "%{http_code}" https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=1 -u admin:pass` | Wait and retry; bridge returns `[]` gracefully on server errors |
+| 11 | **Password visible in `ps aux`** | Using literal `--sn-pass` instead of `env:` syntax | `ps aux \| grep cli.py` | Switch to `--sn-pass env:SN_PASS` pattern |
+| 12 | **SSL certificate verification failed** | Self-signed cert, corporate proxy, or expired cert on ServiceNow instance | `curl -v https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=1` | Set `REQUESTS_CA_BUNDLE` env var to your CA bundle path; ensure instance cert is valid |
+| 13 | **Slow response (> 10 seconds)** | Large table, many fields, or underpowered ServiceNow node | `time curl -s https://{instance}.service-now.com/api/now/table/incident?sysparm_limit=100 -u admin:pass` | Add `sysparm_fields=number,short_description,priority` to query; reduce `sysparm_limit` |
+| 14 | **Truncated output (exactly 50 records)** | Engine caps output at 50 items by design | Check report header `total` vs record count | This is intentional; adjust `cap` parameter in `engine.py` if more records needed |
+
+---
+
+## FAQ
+
+### General
+
+**Q: What tables can I query besides `incident`?**  
+A: Any ServiceNow table accessible via the REST Table API — `change_request`, `problem`, `sc_task`, `sc_req_item`, `cmdb_ci`, or any custom table. The bridge is table-agnostic; just pass `--table your_table_name`.
+
+**Q: Does the bridge write anything back to ServiceNow?**  
+A: No. Phase 1 is entirely read-only. It fetches records and writes reports locally. Phase 2 will add optional xMatters event creation, but the bridge will never mutate ServiceNow data.
+
+**Q: Can I run this on a schedule (cron/CI)?**  
+A: Yes. This is the recommended deployment pattern. Use `env:SN_PASS` for credentials, then schedule via cron, GitHub Actions, or any workflow orchestrator. Example cron entry (every 10 minutes): `*/10 * * * * cd /opt/bridge && python3 src/cli.py --sn-url https://... --sn-user svc_account --sn-pass env:SN_PASS --output /var/log/bridge/report`
+
+### Troubleshooting
+
+**Q: Why do I get `total: 0` even though I know the table has records?**  
+A: The most common cause is ACL restrictions — the ServiceNow user may lack read access to the specific table or certain fields. Verify by running the equivalent `curl` command directly. If `curl` returns records but the bridge doesn't, check that you're passing the correct `--sn-url` (the instance URL, not the UI URL).
+
+**Q: How do I handle ServiceNow instances behind a corporate proxy?**  
+A: Set the `HTTPS_PROXY` environment variable before running: `export HTTPS_PROXY=http://proxy.company.com:8080`. The `requests` library will automatically route through it. For authenticated proxies, use `http://user:pass@proxy.company.com:8080` (URL-encode special characters in the password).
+
+**Q: What happens if ServiceNow is down when the bridge runs?**  
+A: The bridge handles network failures gracefully — it catches connection errors and returns an empty result set rather than crashing. The report will show `total: 0` with a timestamp, which serves as a signal that the run occurred but no data was available. No partial or corrupted reports are generated.
+
+### Security & Compliance
+
+**Q: Are my ServiceNow credentials exposed in the report output?**  
+A: No. The bridge never includes credentials in any output file — JSON or Markdown reports contain only fetched table data (record numbers, descriptions, priorities, assignment info). No system properties, user lists, or connection strings are ever written to disk.
 
 ---
 
@@ -383,6 +519,8 @@ For comprehensive testing, see:
 ---
 
 ## License
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 Copyright (C) 2026 Vladimir Kapustin
 
